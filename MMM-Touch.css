@@ -1,0 +1,13 @@
+#TOUCH {
+  width: 150px;
+}
+
+#TOUCH .region_1 {
+  background-color: red;
+  height:100px;
+}
+
+#TOUCH .region_2 {
+  background-color: blue;
+  height:100px;
+}
