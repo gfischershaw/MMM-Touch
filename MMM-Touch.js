@@ -370,7 +370,7 @@ class Gesture {
     else if (result = this._isSwiped(dist, dir, dur)) {}
     else if (sc.count !== ec.count) { return false }
     else if (result = this._isRotated(dist, dir, dur)) {}
-    else if (result = this._isPinched(dist, dir, dur)) {}
+    else if (result = this._isPinched(sc, ec, dist, dir, dur)) {}
     else if (result = this._isMoved(dist, dir, dur)) {}
     else if (result = this._isPressed(dist, dir, dur)) {}
     else {
@@ -448,25 +448,29 @@ class Gesture {
   }
 
   _isRotated(dist, dir, dur) {
+    if (dur < this._threshold.moment_ms) return false
     //I'm not good at Mathmatics, so cannot make determining rotation with over 2 fingers.
     var ss = Object.keys(this._rec.startPoints)
     var es = Object.keys(this._rec.curPoints)
     if ((ss.length !== es.length) || (ss.length !== 2) ) return false
     if (!ss.every((si)=>{return es.includes(si)})) return false
-
     var sv = {
-      xd:this._rec.startPoints[ss[1]].x - this._rec.startPoints[ss[0]].x,
-      yd:this._rec.startPoints[ss[1]].y - this._rec.startPoints[ss[0]].y
+      xd:this._rec.startPoints[ss[0]].x - this._rec.startPoints[ss[1]].x,
+      yd:this._rec.startPoints[ss[0]].y - this._rec.startPoints[ss[1]].y
     }
     var ev = {
-      xd:this._rec.curPoints[ss[1]].x - this._rec.curPoints[ss[0]].x,
-      yd:this._rec.curPoints[ss[1]].y - this._rec.curPoints[ss[0]].y
+      xd:this._rec.curPoints[ss[0]].x - this._rec.curPoints[ss[1]].x,
+      yd:this._rec.curPoints[ss[0]].y - this._rec.curPoints[ss[1]].y
     }
-    var cross = sv.xd * ev.yd - sv.yd * ev.xd
-    var degree = Math.acos(cross / (Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd) * Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd))) * 180 / Math.PI
+    var cross = sv.xd * ev.yd + sv.yd * ev.xd
+if (cross == 0) return false
+
+
+var dg = Math.atan2(sv.yd, sv.xd) - Math.atan2(ev.yd, ev.xd)
+var degree = dg * 180 / Math.PI
 
     if (Math.abs(degree) > this._threshold.rotate_dg) {
-      var g = (cross) ? Gesture.GESTURE.ROTATE_CCW : Gesture.GESTURE.ROTATE_CW
+      var g = (degree > 0) ? Gesture.GESTURE.ROTATE_CCW : Gesture.GESTURE.ROTATE_CW
       return {
         gesture: g,
         fingers: 2,
@@ -504,7 +508,7 @@ class Gesture {
     }
   }
 
-  _isPinched(dist, dir, dur) {
+  _isPinched(sp, ep, dist, dir, dur) {
     if (this._rec.pressingIndexSet.size < 2) return false
     var threshold = this._threshold.pinch_px * Object.keys(this._rec.startPoints).length
     var g = Gesture.GESTURE.UNRECOGNIZED
