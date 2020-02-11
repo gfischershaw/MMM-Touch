@@ -463,7 +463,7 @@ class Gesture {
       yd:this._rec.curPoints[ss[1]].y - this._rec.curPoints[ss[0]].y
     }
     var cross = sv.xd * ev.yd - sv.yd * ev.xd
-    var degree = acos(cross / (Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd) * Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd))) * 180 / Math.PI
+    var degree = Math.acos(cross / (Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd) * Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd))) * 180 / Math.PI
 
     if (Math.abs(degree) > this._threshold.rotate_dg) {
       var g = (cross) ? Gesture.GESTURE.ROTATE_CCW : Gesture.GESTURE.ROTATE_CW
