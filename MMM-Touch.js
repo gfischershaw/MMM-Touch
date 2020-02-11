@@ -9,22 +9,62 @@ var log = function() {
 
 Module.register("MMM-Touch", {
   defaults: {
-    debug: true,
-    gestureConfig: {
-      pinchThreshold: 100,
-      timeoutThreshold: 1000 * 5,
-      moveThreshold: 100,
-      fingerThreshold: 5,
-      pressThreshold: 1000 * 3,
-      restartThreshold: 1000 * 0.3,
+    debug: false,
+    useDisplay: true,
+    threshold: {
+      moment_ms: 1000 * 0.5, // TAP and SWIPE should be quicker than this.
+      press_ms: 1000 * 3, // PRESS should be longer than this.
+      move_px: 50, // MOVE and SWIPE should go further than this.
+      pinch_px: 50, // Average of traveling distance of each finger should be more than this for PINCH
+      rotate_dg: 20, // Average rotating angle of each finger should be more than this for ROTATE
     },
-    triggers: [],
+    defaultMode: "default",
+    gestureCommands: {},
+    onNotification: (commander, noti, payload, sender) => {}
   },
 
   start: function() {
+    console.log(">", this.config)
     this.gesture = null
+    this.curCommand = null
+    this.useDisplay = this.config.useDisplay
+    this.onNotification = this.config.onNotification
     if (this.config.debug) {
       log = _log
+    }
+    this.mode = this.config.defaultMode
+    this.commands = {}
+    console.log(this.config.gestureCommands)
+    for(var mode in this.config.gestureCommands) {
+      if (this.config.gestureCommands.hasOwnProperty(mode)) {
+        var commands = this.config.gestureCommands[mode]
+        for (var gest in commands) {
+          if (commands.hasOwnProperty(gest)) {
+            this.registerCommand(mode, gest, commands[gest])
+          }
+        }
+      }
+    }
+    this.commanderCallbacks = {
+      sendNotification: (noti, payload) => {
+        this.sendNotification(noti, payload)
+      },
+      shellExec: (scr) => {
+        if (!scr) return false
+        this.sendSocketNotification("SHELL_EXEC", scr)
+      },
+      getModules: () => {
+        return MM.getModules()
+      },
+      getMode: () => {
+        return this.mode
+      },
+      setMode: (mode = null) => {
+        return this.setMode(mode)
+      },
+      forceCommand: (mode, gestureObject) => {
+        return this.forceCommand(mode, gestureObject)
+      }
     }
   },
 
@@ -35,13 +75,39 @@ Module.register("MMM-Touch", {
   getDom: function() {
     var dom = document.createElement("div")
     dom.id = "TOUCH"
-    var t1 = document.createElement("div")
-    t1.className = "region_1"
-    dom.appendChild(t1)
-    var t2 = document.createElement("div")
-    t2.className = "region_2"
-    dom.appendChild(t2)
+    if (!this.config.useDisplay) {
+      dom.classList.add("hidden")
+      return dom
+    }
+
+    var mode = document.createElement("div")
+    mode.classList.add("mode")
+    mode.innerHTML = this.mode
+    var command = document.createElement("div")
+    command.classList.add("command")
+    if (this.curCommand) {
+      command.classList.add("fired")
+      command.innerHTML = this.curCommand
+      this.curCommand = null
+    }
+    dom.appendChild(mode)
+    dom.appendChild(command)
     return dom
+  },
+
+  registerCommand: function(mode, gest, func) {
+    if (!this.commands.hasOwnProperty(mode)) {
+      this.commands[mode] = {}
+    }
+    if (typeof func == "function") this.commands[mode][gest] = func
+  },
+
+  setMode: function(mode = null) {
+    if (!mode) return false
+    if (!this.commands.hasOwnProperty(mode)) return false
+    this.mode = mode
+    this.updateDom()
+    return mode
   },
 
   notificationReceived: function (noti, payload, sender) {
@@ -50,57 +116,117 @@ Module.register("MMM-Touch", {
         log("Already gesture engine is started.")
       } else {
         this.defineTouch()
-
       }
+    }
 
-      //this.registerTriggers()
+    if (noti == "TOUCH_USE_DISPLAY") {
+      this.useDisplay = payload
+      this.updateDom()
+    }
+
+    if (noti == "TOUCH_GET_MODE") {
+      if (typeof payload == "function") {
+        payload(this.mode)
+      }
+    }
+
+    if (noti == "TOUCH_SET_MODE") {
+      if (payload.mode) {
+        this.setMode(payload.mode)
+      }
+    }
+
+    if (noti == "TOUCH_REGISTER_COMMAND") {
+      this.registerCommand(payload.mode, payload.gesture, payload.func)
+    }
+
+    if (noti == "TOUCH_FORCE_COMMAND") {
+      this.forceCommand(payload.mode, payload.gestureObject)
     }
 
     if (noti == "TOUCH_CANCEL") {
       this.gesture.cancel()
     }
+
+    if (typeof this.onNotification == "function") {
+      this.onNotification(new GestureCommander(this.commanderCallbacks), noti, payload, sender)
+    }
   },
 
   defineTouch: function() {
-    this.gesture = new Gesture(this.config.gestureConfig)
-    var listener = this.gesture.getListener()
-    listener
+    this.gesture = new Gesture(this.config.threshold)
+    this.gesture
       .on("canceled", (res)=>{
         log("Canceled.")
       })
-      .on("firsttouch", (res)=>{
-        log("First Touch started.")
+      .on(Gesture.EVENT.RECOGNIZED, (res)=>{
+        log("Recognized:", res)
+        this.doCommand(res)
       })
-      .on("lastrelease", (res)=>{
-        log("Last Touch released.")
-      })
-      .on("recognized", (res)=>{
-        log("Recognized:", res.command, res)
-        this.gesture.start()
-      })
-      .on("unrecognized", (res)=>{
+      .on(Gesture.EVENT.UNRECOGNIZED, (res)=>{
         log("Unecognized")
-        this.gesture.start()
       })
+  },
+
+  forceCommand: function(mode, gestureObject) {
+    return this.doCommand(gestureObject, mode)
+  },
+
+  doCommand: function(gest, mode=this.mode) {
+    var command = gest.gesture + "_" + gest.fingers
+    if (!this.commands.hasOwnProperty(mode)) return
+    if (this.commands[mode].hasOwnProperty(command)) {
+      this.curCommand = command
+      this.commands[mode][command](new GestureCommander(this.commanderCallbacks), gest)
+      this.updateDom()
+    }
   }
 })
 
-// touch1~5
-// move1~5
-
-
 class Gesture {
-  constructor(config) {
-    this._status = {
-      "READY" : 0,
-      "STARTED" : 1,
-      "ENDED" : 2,
-      "RECOGNIZED": 3,
+  static get EVENT() {
+    return {
+      "RECOGNIZED": "RECOGNIZED",
+      "UNRECOGNIZED": "UNRECOGNIZED"
     }
-    this._config = config
+  }
+
+  static get GESTURE() {
+    return {
+      "ROTATE_CW": "ROTATE_CW",
+      "ROTATE_CCW": "ROTATE_CCW",
+      "MOVE_UP": "MOVE_UP",
+      "MOVE_DOWN": "MOVE_DOWN",
+      "MOVE_LEFT": "MOVE_LEFT",
+      "MOVE_RIGHT": "MOVE_RIGHT",
+      "PINCH_IN": "PINCH_IN",
+      "PINCH_OUT": "PINCH_OUT",
+      "PRESS": "PRESS",
+      "SWIPE_UP": "SWIPE_UP",
+      "SWIPE_DOWN": "SWIPE_DOWN",
+      "SWIPE_LEFT": "SWIPE_LEFT",
+      "SWIPE_RIGHT": "SWIPE_RIGHT",
+      "TAP": "TAP",
+      "UNRECOGNIZED": "UNRECOGNIZED"
+    }
+  }
+
+  static get DIRECTION() {
+    return {
+      "NODIRECTION": "NODIRECTION",
+      "UP": "UP",
+      "DOWN" : "DOWN",
+      "LEFT" : "LEFT",
+      "RIGHT" : "RIGHT"
+    }
+  }
+
+  constructor(threshold) {
+    this._events = {}
+    this._threshold = threshold
     this._dom = document.body
     var handlerTouch = (evt) => {
-      this._handlerTouch(evt)
+      this._handlerTouch("touch", evt)
     }
     var handlerRelease = (evt) => {
       this._handlerRelease(evt)
@@ -108,238 +234,22 @@ class Gesture {
     var handlerCancel = (evt) => {
       this._handlerCancel(evt)
     }
+    var handlerMove = (evt) => {
+      this._handlerTouch("move", evt)
+    }
     this._dom.addEventListener("touchstart", handlerTouch)
     this._dom.addEventListener("touchend", handlerRelease)
-    this._dom.addEventListener("touchmove", handlerTouch)
+    this._dom.addEventListener("touchmove", handlerMove)
     this._dom.addEventListener("touchcancel", handlerCancel)
-    this._listener = new TouchEventEmitter()
-    this.start()
+    this._rec = null
+    this.ready()
   }
-
-  getListener() {
-    return this._listener
-  }
-
-  cancel() {
-    this._canceld = true
-    this._process()
-  }
-
-  start() {
-    setTimeout(()=>{
-      this._init()
-    }, this._config.restartThreshold)
-  }
-
-
-  _init() {
-    this._gesture = {
-      status: 0,
-      count: 0,
-      startTime: 0,
-      endTime: 0,
-      touches: {},
-      startWeight: {
-        x:0,
-        y:0,
-      },
-      endWeight: {
-        x:0,
-        y:0,
-      },
-    }
-    this._canceled = false
-    this._timeout = null
-
-  }
-
-  _handlerTouch(evt) {
-    if (this._canceled) this._process()
-    if (this._gesture.status >= this._status.ENDED) return
-    if (this._gesture.status == this._status.READY) {
-      this._gesture.status = this._status.STARTED
-      this._gesture.startTime = evt.timeStamp
-      this._listener.emit("firsttouch")
-      this._timeout = setTimeout(()=>{
-        this.cancel()
-      }, this._config.timeoutThreshold)
-    }
-    var touches = evt.changedTouches
-    for (var i = 0; i < touches.length; i++) {
-      var t = touches[i]
-      var id = t.identifier
-      if (this._gesture.touches.hasOwnProperty(id)) {
-        // existed finger
-      } else {
-        // new finger
-        this._gesture.touches[id] = []
-        this._gesture.startWeight.x += t.pageX
-        this._gesture.startWeight.y += t.pageY
-        this._gesture.count++
-      }
-      this._gesture.touches[id].push({
-        x: t.pageX,
-        y: t.pageY,
-        timeStamp: evt.timeStamp
-      })
-    }
-  }
-
-  _handlerRelease(evt) {
-    if (this._canceled) this._process()
-    if (this._gesture.status >= this._status.ENDED) return
-    var touches = evt.changedTouches
-    var error = false
-    for (var i = 0; i < touches.length; i++) {
-      var t = touches[i]
-      var id = t.identifier
-      if (this._gesture.touches.hasOwnProperty(id)) {
-        // existed finger
-        this._gesture.touches[id].push({
-          x: t.pageX,
-          y: t.pageY,
-          timeStamp: evt.timeStamp
-        })
-        this._gesture.endWeight.x += t.pageX
-        this._gesture.endWeight.y += t.pageY
-        this._gesture.count--
-      } else {
-        // new finger
-        error = true
-      }
-    }
-    if (error) {
-      this.cancel()
-      return
-    }
-    if (this._gesture.count == 0 ) {
-      this._gesture.status = this._status.ENDED
-      this._gesture.endTime = evt.timeStamp
-      this._listener.emit("lastrelease")
-      this._process()
-    } else {
-      this.cancel()
-    }
-  }
-
-
-  _handlerCancel(evt) {
-    this.cancel()
-  }
-
-
-  _process() {
-    clearTimeout(this._timeout)
-    this._timeout = null
-    if (this._canceled) {
-      this._listener.emit("canceled")
-      this.start()
-      return
-    }
-    var result = null
-    result = this._recognize(this._gesture)
-
-    if (result) {
-      this._listener.emit("recognized", result)
-    } else {
-      this._listener.emit("unrecognized", result)
-    }
-  }
-
-  _recognize(gesture = this._gesture) {
-    var getDistance = (startPos, pointPos)=>{
-      var x = startPos.x - pointPos.x
-      var y = startPos.y - pointPos.y
-      return Math.hypot(x, y)
-    }
-    var getDirection = (start, end) => {
-      if (getDistance(start, end) < this._config.moveThreshold) {
-        return 0
-      }
-      var moveX = (end.x - start.x)
-      var moveY = (end.y - start.y)
-      if (Math.abs(moveX) >= Math.abs(moveY)) {
-        if (moveX >= 0) {
-          return 2 // right
-        } else {
-          return 4 // left
-        }
-      } else {
-        if (moveY >= 0) {
-          return 3 // down
-        } else {
-          return 1 // up
-        }
-      }
-    }
-    var pinch = 0
-    var fingers = Object.keys(gesture.touches).length
-    if (!fingers) return false
-    var duration = gesture.endTime - gesture.startTime
-    var startGesture = {
-      x: gesture.startWeight.x / fingers,
-      y: gesture.startWeight.y / fingers,
-    }
-    var endGesture = {
-      x: gesture.endWeight.x / fingers,
-      y: gesture.endWeight.y / fingers,
-    }
-    var dStart = 0
-    var dEnd = 0
-    var path = []
-    for (var i in gesture.touches) {
-      if (gesture.touches.hasOwnProperty(i)) {
-        var t = gesture.touches[i]
-        if (t.length >= 2) {
-          var start = t[0]
-          var end = t[t.length - 1]
-          var tx = getDistance(startGesture, start)
-          dStart += (getDistance(startGesture, start) / fingers)
-          dEnd += (getDistance(endGesture, end) / fingers)
-        } else {
-          return false
-        }
-      }
-    }
-    if (dEnd - dStart > this._config.pinchThreshold) pinch = 1 // pinchout
-    if (dStart - dEnd > this._config.pinchThreshold) pinch = 2 // pinchin
-    var distance = dEnd - dStart
-    var direction = getDirection(startGesture, endGesture)
-    var move = getDistance(gesture.startWeight, gesture.endWeight)
-
-    var command = ""
-    if (pinch == 1) {
-      command += "PinchOut"
-    } else if (pinch == 2) {
-      command += "PinchIn"
-    } else {
-      const c = ["Tap", "Up", "Right", "Down", "Left"]
-      command += c[direction]
-    }
-    command += fingers
-    var result = {
-      command: command,
-      fingers: fingers,
-      duration: duration,
-      direction: direction,
-      pinch: pinch,
-      distance: distance,
-      move: move,
-      touches: gesture.touches,
-    }
-    return result
-  }
-}
-
-class TouchEventEmitter {
-  constructor(){
-    this.events = {}
-  }
+/** EventEmitter part **/
   _getEventListByName(eventName){
-    if(typeof this.events[eventName] === 'undefined'){
-      this.events[eventName] = new Set()
+    if(typeof this._events[eventName] === 'undefined'){
+      this._events[eventName] = new Set()
     }
-    return this.events[eventName]
+    return this._events[eventName]
   }
 
   on(eventName, fn){
@@ -358,6 +268,7 @@ class TouchEventEmitter {
   }
 
   emit(eventName, ...args){
+    log("EventEmit:", eventName)
     this._getEventListByName(eventName).forEach(function(fn){
       fn.apply(this,args)
     }.bind(this))
@@ -365,5 +276,329 @@ class TouchEventEmitter {
 
   removeListener(eventName, fn){
     this._getEventListByName(eventName).delete(fn);
+  }
+
+/** Gesture Handler part **/
+
+  cancel() {
+    this.emit(Gesture.EVENT.UNRECOGNIZED, null)
+    this._init()
+  }
+
+  ready() {
+    this._init()
+  }
+
+  _init() {
+    log("New Gesture")
+    this._rec = {
+      startFromTouch: false,
+      firstTime: null,
+      lastTime: null,
+      fingerIndexSet: new Set(),
+      pressingIndexSet: new Set(),
+      startPoints: {},
+      curPoints: {},
+    }
+  }
+
+  _handlerTouch(type, evt) {
+    var r = this._rec
+    var touches = evt.changedTouches
+    for (var i = 0; i < touches.length; i++) {
+      var t = touches[i]
+      var id = t.identifier
+      r.pressingIndexSet.add(id) //Anyhow, pressed.
+      r.lastTime = evt.timeStamp
+      if (!r.startPoints.hasOwnProperty(id)) {
+        if (Object.keys(r.startPoints).length == 0) {
+          r.firstTime = evt.timeStamp
+        }
+        r.startPoints[id] = {
+          x: t.pageX,
+          y: t.pageY,
+        }
+      }
+      r.curPoints[id] = {
+        x: t.pageX,
+        y: t.pageY
+      }
+      if (type == "touch") {
+        if (r.fingerIndexSet.has(id)) {
+          //already registered. how?
+        } else {
+          if (r.pressingIndexSet.size == 1) {
+            r.startFromTouch = true
+          }
+          r.fingerIndexSet.add(id)
+        }
+      } else {
+        // when moving. (pressing)
+      }
+    }
+    this._recognize()
+  }
+
+  _handlerRelease(evt) {
+    var r = this._rec
+    var touches = evt.changedTouches
+    for (var i = 0; i < touches.length; i++) {
+      var t = touches[i]
+      var id = t.identifier
+      r.pressingIndexSet.delete(id)
+      r.curPoints[id] = {
+        x: t.pageX,
+        y: t.pageY
+      }
+      if (r.pressingIndexSet.size == 0) {
+        r.lastTime = evt.timeStamp
+      }
+    }
+    this._recognize()
+  }
+
+  _recognize() {
+    var r = this._rec
+    var sc = this._getCentroid(r.startPoints)
+    var ec = this._getCentroid(r.curPoints)
+    var dist = this._getDistance(sc, ec)
+    var dir = this._getDirection(sc, ec)
+    var dur = this._getDuration()
+    if (!sc || !ec) return false
+    var result = null
+    if (result = this._isTapped(dist, dir, dur)) {}
+    else if (result = this._isSwiped(dist, dir, dur)) {}
+    else if (sc.count !== ec.count) { return false }
+    else if (result = this._isRotated(dist, dir, dur)) {}
+    else if (result = this._isPinched(dist, dir, dur)) {}
+    else if (result = this._isMoved(dist, dir, dur)) {}
+    else if (result = this._isPressed(dist, dir, dur)) {}
+    else {
+      // nothing happened. but should check current pressing is zero
+      if (r.pressingIndexSet.size == 0) {
+        this.emit(Gesture.EVENT.UNRECOGNIZED, null)
+        this._init()
+      }
+      return false
+    }
+    var temp = {
+      distance: dist,
+      direction: dir,
+      duration: dur,
+    }
+    this.emit(Gesture.EVENT.RECOGNIZED, Object.assign({}, temp, result))
+    this._init()
+    return true
+  }
+
+  _getCentroid(points) {
+    var count = 0
+    var x = 0
+    var y = 0
+    for (var i in points) {
+      if (points.hasOwnProperty(i)) {
+        count++
+        x += points[i].x
+        y += points[i].y
+      }
+    }
+    if (count > 0) {
+      return {
+        xSum: x,
+        ySum: y,
+        x: x / count,
+        y: y / count,
+        count: count
+      }
+    } else {
+      return false
+    }
+  }
+
+  _getDuration() {
+    return this._rec.lastTime - this._rec.firstTime
+  }
+
+  _getDistance(sp, ep) {
+    var x = sp.x - ep.x
+    var y = sp.y - ep.y
+    return Math.hypot(x, y)
+  }
+
+  _getDirection (sp, ep) {
+    var moveX = (ep.x - sp.x)
+    var moveY = (ep.y - sp.y)
+    if (Math.abs(moveX) >= Math.abs(moveY)) {
+      if (moveX >= 0) {
+        return Gesture.DIRECTION.RIGHT
+      } else {
+        return Gesture.DIRECTION.LEFT
+      }
+    } else {
+      if (moveY >= 0) {
+        return Gesture.DIRECTION.DOWN
+      } else {
+        return Gesture.DIRECTION.UP
+      }
+    }
+  }
+
+  _getDegree(sp, ep) {
+    return Math.atan2(ep.y - sp.y, ep.x - sp.x) * 180 / Math.PI
+  }
+
+  _isRotated(dist, dir, dur) {
+    //I'm not good at Mathmatics, so cannot make determining rotation with over 2 fingers.
+    var ss = Object.keys(this._rec.startPoints)
+    var es = Object.keys(this._rec.curPoints)
+    if ((ss.length !== es.length) || (ss.length !== 2) ) return false
+    if (!ss.every((si)=>{return es.includes(si)})) return false
+
+    var sv = {
+      xd:this._rec.startPoints[ss[1]].x - this._rec.startPoints[ss[0]].x,
+      yd:this._rec.startPoints[ss[1]].y - this._rec.startPoints[ss[0]].y
+    }
+    var ev = {
+      xd:this._rec.curPoints[ss[1]].x - this._rec.curPoints[ss[0]].x,
+      yd:this._rec.curPoints[ss[1]].y - this._rec.curPoints[ss[0]].y
+    }
+    var cross = sv.xd * ev.yd - sv.yd * ev.xd
+    var degree = acos(cross / (Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd) * Math.sqrt(sv.xd * sv.xd + sv.yd * sv.yd))) * 180 / Math.PI
+
+    if (Math.abs(degree) > this._threshold.rotate_dg) {
+      var g = (cross) ? Gesture.GESTURE.ROTATE_CCW : Gesture.GESTURE.ROTATE_CW
+      return {
+        gesture: g,
+        fingers: 2,
+        degree: degree,
+      }
+    }
+    return false
+  }
+
+  _isMoved(dist, dir, dur) {
+    if (dur < this._threshold.moment_ms) return false
+    if (dist > this._threshold.move_px) {
+      var g = Gesture.GESTURE.UNRECOGNIZED
+      if (dir == Gesture.DIRECTION.UP) g = Gesture.GESTURE.MOVE_UP
+      if (dir == Gesture.DIRECTION.DOWN) g = Gesture.GESTURE.MOVE_DOWN
+      if (dir == Gesture.DIRECTION.LEFT) g = Gesture.GESTURE.MOVE_LEFT
+      if (dir == Gesture.DIRECTION.RIGHT) g = Gesture.GESTURE.MOVE_RIGHT
+      return {
+        gesture: g,
+        fingers: this._rec.pressingIndexSet.size,
+      }
+    }
+    return false
+  }
+
+  _isPressed(dist, dir, dur) {
+    if (!this._rec.startFromTouch) return false
+    if (this._rec.pressingIndexSet.size == 0) return false
+    if (dist > this._threshold.move_px) return false
+    if (dur < this._threshold.moment_ms) return false
+    if (dur < this._threshold.press_ms) return false
+    return {
+      gesture: Gesture.GESTURE.PRESS,
+      fingers: this._rec.fingerIndexSet.size,
+    }
+  }
+
+  _isPinched(dist, dir, dur) {
+    if (this._rec.pressingIndexSet.size < 2) return false
+    var threshold = this._threshold.pinch_px * Object.keys(this._rec.startPoints).length
+    var g = Gesture.GESTURE.UNRECOGNIZED
+    var spoints = Object.values(this._rec.startPoints)
+    var epoints = Object.values(this._rec.curPoints)
+    var sdSum = 0
+    var edSum = 0
+    for (var i = 0; i < spoints.length; i++) {
+      sdSum += this._getDistance(sp, spoints[i])
+      edSum += this._getDistance(ep, epoints[i])
+    }
+    if (edSum >= sdSum + threshold) {
+      g = Gesture.GESTURE.PINCH_OUT
+    } else if (edSum < sdSum - threshold) {
+      g = Gesture.GESTURE.PINCH_IN
+    } else {
+      return false
+    }
+    return {
+      gesture: g,
+      fingers: this._rec.pressingIndexSet.size,
+      pinchSum: edSum - sdSum,
+    }
+  }
+
+  _isSwiped(dist, dir, dur) {
+    if (!this._rec.startFromTouch) return false
+    if (this._rec.pressingIndexSet.size !== 0) return false
+    if (dist < this._threshold.move_px) return false
+    if (dur < this._threshold.moment_ms) {
+      var g = Gesture.GESTURE.UNRECOGNIZED
+      if (dir == Gesture.DIRECTION.UP) g = Gesture.GESTURE.SWIPE_UP
+      if (dir == Gesture.DIRECTION.DOWN) g = Gesture.GESTURE.SWIPE_DOWN
+      if (dir == Gesture.DIRECTION.LEFT) g = Gesture.GESTURE.SWIPE_LEFT
+      if (dir == Gesture.DIRECTION.RIGHT) g = Gesture.GESTURE.SWIPE_RIGHT
+      return {
+        gesture: g,
+        fingers: this._rec.fingerIndexSet.size,
+      }
+    }
+    return false
+  }
+
+  _isTapped(dist, dir, dur) {
+    if (!this._rec.startFromTouch) return false
+    if (this._rec.pressingIndexSet.size !== 0) return false
+    if (dist > this._threshold.move_px) return false
+    if (dur < this._threshold.moment_ms) {
+      var g = Gesture.GESTURE.TAP
+      return {
+        gesture: g,
+        fingers: this._rec.fingerIndexSet.size,
+      }
+    }
+    return false
+  }
+}
+
+class GestureCommander {
+  constructor (callbacks) {
+    this._callbacks = callbacks
+  }
+
+  sendNotification(noti, payload) {
+    log("Notification firing:", noti)
+    this._callbacks.sendNotification(noti, payload)
+  }
+
+  shellExec(scr) {
+    log("Shell command executing:", scr)
+    this._callbacks.shellExec(scr)
+  }
+
+  getModule(mName = null) {
+    var modules = this.getModules()
+    if (mName == null) mName = "MMM-Touch"
+    for (var i = 0; i < modules.length; i++) {
+      if (modules[i].name == mName) return modules[i]
+    }
+  }
+
+  getModules() {
+    return this._callbacks.getModules()
+  }
+
+  getMode() {
+    return this._callbacks.getMode()
+  }
+
+  setMode(mode = null) {
+    return this._callbacks.setMode(mode)
+  }
+
+  forceCommand(mode, gestureObject) {
+    return this._callbacks.forceCommand(mode, gestureObject)
   }
 }

@@ -1,6 +1,38 @@
+@keyframes fadeOut {
+   0% {opacity: 1;}
+   100% {opacity: 0;}
+}
+
 #TOUCH {
   width: 150px;
+  font-size:16px;
+  text-align:left;
+  line-height: 100%;
 }
+
+#TOUCH.hidden {
+  display:none;
+}
+
+#TOUCH .mode {
+  background-color:#FFF;
+  color:#000;
+  border-radius:8px;
+  padding:4px;
+}
+
+#TOUCH .command {
+    background-color:#00F;
+    color:#FFF;
+    border-radius:8px;
+    padding:4px;
+ }
+
+ #TOUCH .command.fired {
+   animation-name: fadeOut;
+   animation-duration: 1s;
+   opacity:0;
+ }
 
 #TOUCH .region_1 {
   background-color: red;
