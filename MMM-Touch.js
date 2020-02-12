@@ -582,7 +582,7 @@ class Gesture {
     var threshold = this._threshold.pinch_px * Object.keys(this._rec.startTouches).length
     var g = Gesture.GESTURE.UNRECOGNIZED
     var spoints = Object.values(this._rec.startTouches)
-    var epoints = Object.values(this._rec.curTouches)
+    var epoints = Object.values(this._rec.lastTouches)
     var sdSum = 0
     var edSum = 0
     for (var i = 0; i < spoints.length; i++) {
