@@ -379,6 +379,7 @@ class Gesture {
 
 
     var r = this._rec
+    r.lastTime = evt.timeStamp
     var touches = evt.touches
     r.touching = touches.length
     for (var i = 0; i < touches.length; i++) {
@@ -407,6 +408,7 @@ class Gesture {
 
   _handlerRelease(evt) {
     var r = this._rec
+    r.lastTime = evt.timeStamp
     r.touching = evt.touches.length
     var touches = evt.changedTouches
     for (var i = 0; i < touches.length; i++) {
@@ -419,8 +421,7 @@ class Gesture {
       }
     }
     if (r.touching == 0) {
-      // all finger released0
-      r.lastTime = evt.timeStamp
+      // all finger released
       r.allFingerReleased = true
       this._recognize()
     }
