@@ -19,22 +19,40 @@ Module.register("MMM-Touch", {
       rotate_dg: 20, // Average rotating angle of each finger should be more than this for ROTATE
     },
     defaultMode: "default",
-    gestureCommands: {},
-    onNotification: (commander, noti, payload, sender) => {}
+    gestureCommands: {
+      "default": {
+        "TAP_1": (commander) => {
+          commander.sendNotification("SHOW_ALERT", {
+            title: "TOUCH Test.",
+            timer: 3000,
+          })
+        },
+        "PRESS_1": (commander) => {
+          commander.getModules().forEach((m)=>{m.hide()})
+          commander.setMode("hidden")
+        }
+      },
+      "hidden": {
+        "PRESS_1": (commander) => {
+          commander.getModules().forEach((m)=>{m.show()})
+          commander.setMode("default")
+        }
+      }
+    },
+    onNotification: null
   },
 
   start: function() {
-    console.log(">", this.config)
     this.gesture = null
     this.curCommand = null
     this.useDisplay = this.config.useDisplay
-    this.onNotification = this.config.onNotification
+    this.tempTimer = null
+    this.onNotification = (typeof this.config.onNotification == "function") ? this.config.onNotification : ()=>{}
     if (this.config.debug) {
       log = _log
     }
     this.mode = this.config.defaultMode
     this.commands = {}
-    console.log(this.config.gestureCommands)
     for(var mode in this.config.gestureCommands) {
       if (this.config.gestureCommands.hasOwnProperty(mode)) {
         var commands = this.config.gestureCommands[mode]
@@ -79,19 +97,14 @@ Module.register("MMM-Touch", {
       dom.classList.add("hidden")
       return dom
     }
-
     var mode = document.createElement("div")
     mode.classList.add("mode")
     mode.innerHTML = this.mode
     var command = document.createElement("div")
     command.classList.add("command")
-    if (this.curCommand) {
-      command.classList.add("fired")
-      command.innerHTML = this.curCommand
-      this.curCommand = null
-    }
     dom.appendChild(mode)
     dom.appendChild(command)
+    var test = document.createElement("div")
     return dom
   },
 
@@ -106,7 +119,7 @@ Module.register("MMM-Touch", {
     if (!mode) return false
     if (!this.commands.hasOwnProperty(mode)) return false
     this.mode = mode
-    this.updateDom()
+    this.updateMode(this.mode)
     return mode
   },
 
@@ -131,8 +144,8 @@ Module.register("MMM-Touch", {
     }
 
     if (noti == "TOUCH_SET_MODE") {
-      if (payload.mode) {
-        this.setMode(payload.mode)
+      if (payload) {
+        this.setMode(payload)
       }
     }
 
@@ -156,16 +169,49 @@ Module.register("MMM-Touch", {
   defineTouch: function() {
     this.gesture = new Gesture(this.config.threshold)
     this.gesture
-      .on("canceled", (res)=>{
+      .on(Gesture.EVENT.CANCELED, ()=>{
         log("Canceled.")
       })
       .on(Gesture.EVENT.RECOGNIZED, (res)=>{
         log("Recognized:", res)
+        this.touchEnded()
         this.doCommand(res)
+
       })
-      .on(Gesture.EVENT.UNRECOGNIZED, (res)=>{
+      .on(Gesture.EVENT.UNRECOGNIZED, ()=>{
         log("Unecognized")
+        this.touchEnded()
       })
+      .on(Gesture.EVENT.FIRSTTOUCH, ()=>{
+        this.touchStarted()
+      })
+      .on(Gesture.EVENT.YIELD, ()=>{})
+  },
+
+
+  touchStarted: function() {
+    var dom = document.getElementById("TOUCH")
+    dom.classList.add("activated")
+    var command = document.querySelector("#TOUCH .command")
+    command.innerHTML = ""
+    command.classList.remove("fired")
+  },
+
+  touchEnded: function() {
+    var dom = document.getElementById("TOUCH")
+    dom.classList.remove("activated")
+
+  },
+
+  updateMode: function(mode) {
+    var dom = document.getElementById("TOUCH")
+    dom.innerHTML = mode
+  },
+
+  fireCommand: function(c) {
+    var command = document.querySelector("#TOUCH .command")
+    command.innerHTML = c
+    command.classList.add("fired")
   },
 
   forceCommand: function(mode, gestureObject) {
@@ -178,7 +224,8 @@ Module.register("MMM-Touch", {
     if (this.commands[mode].hasOwnProperty(command)) {
       this.curCommand = command
       this.commands[mode][command](new GestureCommander(this.commanderCallbacks), gest)
-      this.updateDom()
+      log("Command executed:", mode, command)
+      this.fireCommand(command)
     }
   }
 })
@@ -187,7 +234,11 @@ class Gesture {
   static get EVENT() {
     return {
       "RECOGNIZED": "RECOGNIZED",
-      "UNRECOGNIZED": "UNRECOGNIZED"
+      "UNRECOGNIZED": "UNRECOGNIZED",
+      "CANCELED": "CANCELED",
+      "STARTED": "STARTED",
+      "FIRSTTOUCH": "FIRSTTOUCH",
+      "YIELD": "YIELD"
     }
   }
 
@@ -224,7 +275,7 @@ class Gesture {
   constructor(threshold) {
     this._events = {}
     this._threshold = threshold
-    this._dom = document.body
+    this._dom = document
     var handlerTouch = (evt) => {
       this._handlerTouch("touch", evt)
     }
@@ -237,10 +288,10 @@ class Gesture {
     var handlerMove = (evt) => {
       this._handlerTouch("move", evt)
     }
-    this._dom.addEventListener("touchstart", handlerTouch)
-    this._dom.addEventListener("touchend", handlerRelease)
-    this._dom.addEventListener("touchmove", handlerMove)
-    this._dom.addEventListener("touchcancel", handlerCancel)
+    this._dom.addEventListener("touchstart", handlerTouch, true)
+    this._dom.addEventListener("touchend", handlerRelease, true)
+    this._dom.addEventListener("touchmove", handlerMove, true)
+    this._dom.addEventListener("touchcancel", handlerCancel, true)
     this._rec = null
     this.ready()
   }
@@ -268,7 +319,7 @@ class Gesture {
   }
 
   emit(eventName, ...args){
-    log("EventEmit:", eventName)
+    //log("EventEmit:", eventName)
     this._getEventListByName(eventName).forEach(function(fn){
       fn.apply(this,args)
     }.bind(this))
@@ -281,7 +332,7 @@ class Gesture {
 /** Gesture Handler part **/
 
   cancel() {
-    this.emit(Gesture.EVENT.UNRECOGNIZED, null)
+    this.emit(Gesture.EVENT.CANCELED, null)
     this._init()
   }
 
@@ -293,47 +344,61 @@ class Gesture {
     log("New Gesture")
     this._rec = {
       startFromTouch: false,
+      allFingerReleased: false,
+      touching:0,
       firstTime: null,
       lastTime: null,
-      fingerIndexSet: new Set(),
-      pressingIndexSet: new Set(),
-      startPoints: {},
-      curPoints: {},
+      startTouches: {},
+      lastTouches: {},
     }
+    this.emit(Gesture.EVENT.STARTED)
+  }
+
+  _handlerCancel(evt) {
+    this.cancel()
   }
 
   _handlerTouch(type, evt) {
+    // check target has onclick
+    var cancelBubbling = false
+    var i = 0
+    if (evt.target.onclick !== null && evt.target !== this._dom) {
+      cancelBubbling = true
+    }
+    while (i < evt.path.length && cancelBubbling !== true) {
+      if (evt.path[i].onclick !== null) {
+        cancelBubbling = true
+      }
+      i++
+    }
+    if (cancelBubbling) {
+      this.emit(Gesture.EVENT.YIELD)
+      this.cancel()
+    }
+
+
     var r = this._rec
-    var touches = evt.changedTouches
+    var touches = evt.touches
+    r.touching = touches.length
     for (var i = 0; i < touches.length; i++) {
       var t = touches[i]
       var id = t.identifier
-      r.pressingIndexSet.add(id) //Anyhow, pressed.
-      r.lastTime = evt.timeStamp
-      if (!r.startPoints.hasOwnProperty(id)) {
-        if (Object.keys(r.startPoints).length == 0) {
-          r.firstTime = evt.timeStamp
-        }
-        r.startPoints[id] = {
-          x: t.pageX,
-          y: t.pageY,
-        }
-      }
-      r.curPoints[id] = {
+      r.lastTouches[id] = {
+        identifier: t.identifier,
         x: t.pageX,
-        y: t.pageY
+        y: t.pageY,
       }
-      if (type == "touch") {
-        if (r.fingerIndexSet.has(id)) {
-          //already registered. how?
-        } else {
-          if (r.pressingIndexSet.size == 1) {
-            r.startFromTouch = true
-          }
-          r.fingerIndexSet.add(id)
-        }
-      } else {
-        // when moving. (pressing)
+      if (Object.keys(r.startTouches).length == 0) {
+        // first touch
+        r.firstTime = evt.timeStamp
+        this.emit(Gesture.EVENT.FIRSTTOUCH)
+        if (type == "touch") r.startFromTouch = true
+        r.target = evt.target
+        r.path = evt.path
+      }
+      if (!r.startTouches.hasOwnProperty(id)) {
+        // new touch
+        r.startTouches[id] = Object.assign({}, r.lastTouches[id])
       }
     }
     this._recognize()
@@ -341,31 +406,35 @@ class Gesture {
 
   _handlerRelease(evt) {
     var r = this._rec
+    r.touching = evt.touches.length
     var touches = evt.changedTouches
     for (var i = 0; i < touches.length; i++) {
       var t = touches[i]
       var id = t.identifier
-      r.pressingIndexSet.delete(id)
-      r.curPoints[id] = {
+      r.lastTouches[id] = {
         x: t.pageX,
-        y: t.pageY
-      }
-      if (r.pressingIndexSet.size == 0) {
-        r.lastTime = evt.timeStamp
+        y: t.pageY,
+        identifier: t.identifier
       }
     }
-    this._recognize()
+    if (r.touching == 0) {
+      // all finger released0
+      r.lastTime = evt.timeStamp
+      r.allFingerReleased = true
+      this._recognize()
+    }
   }
 
   _recognize() {
     var r = this._rec
-    var sc = this._getCentroid(r.startPoints)
-    var ec = this._getCentroid(r.curPoints)
+    var sc = this._getCentroid(r.startTouches)
+    var ec = this._getCentroid(r.lastTouches)
     var dist = this._getDistance(sc, ec)
     var dir = this._getDirection(sc, ec)
     var dur = this._getDuration()
     if (!sc || !ec) return false
     var result = null
+
     if (result = this._isTapped(dist, dir, dur)) {}
     else if (result = this._isSwiped(dist, dir, dur)) {}
     else if (sc.count !== ec.count) { return false }
@@ -375,7 +444,7 @@ class Gesture {
     else if (result = this._isPressed(dist, dir, dur)) {}
     else {
       // nothing happened. but should check current pressing is zero
-      if (r.pressingIndexSet.size == 0) {
+      if (r.touching == 0) {
         this.emit(Gesture.EVENT.UNRECOGNIZED, null)
         this._init()
       }
@@ -385,6 +454,8 @@ class Gesture {
       distance: dist,
       direction: dir,
       duration: dur,
+      target: r.target,
+      path: r.path
     }
     this.emit(Gesture.EVENT.RECOGNIZED, Object.assign({}, temp, result))
     this._init()
@@ -448,27 +519,25 @@ class Gesture {
   }
 
   _isRotated(dist, dir, dur) {
-    if (dur < this._threshold.moment_ms) return false
     //I'm not good at Mathmatics, so cannot make determining rotation with over 2 fingers.
-    var ss = Object.keys(this._rec.startPoints)
-    var es = Object.keys(this._rec.curPoints)
+    //If who can make this better, feel free to make PR.
+    if (dur < this._threshold.moment_ms) return false
+    var ss = Object.keys(this._rec.startTouches)
+    var es = Object.keys(this._rec.lastTouches)
     if ((ss.length !== es.length) || (ss.length !== 2) ) return false
     if (!ss.every((si)=>{return es.includes(si)})) return false
     var sv = {
-      xd:this._rec.startPoints[ss[0]].x - this._rec.startPoints[ss[1]].x,
-      yd:this._rec.startPoints[ss[0]].y - this._rec.startPoints[ss[1]].y
+      xd:this._rec.startTouches[ss[0]].x - this._rec.startTouches[ss[1]].x,
+      yd:this._rec.startTouches[ss[0]].y - this._rec.startTouches[ss[1]].y
     }
     var ev = {
-      xd:this._rec.curPoints[ss[0]].x - this._rec.curPoints[ss[1]].x,
-      yd:this._rec.curPoints[ss[0]].y - this._rec.curPoints[ss[1]].y
+      xd:this._rec.lastTouches[ss[0]].x - this._rec.lastTouches[ss[1]].x,
+      yd:this._rec.lastTouches[ss[0]].y - this._rec.lastTouches[ss[1]].y
     }
     var cross = sv.xd * ev.yd + sv.yd * ev.xd
-if (cross == 0) return false
-
-
-var dg = Math.atan2(sv.yd, sv.xd) - Math.atan2(ev.yd, ev.xd)
-var degree = dg * 180 / Math.PI
-
+    if (cross == 0) return false
+    var dg = Math.atan2(sv.yd, sv.xd) - Math.atan2(ev.yd, ev.xd)
+    var degree = dg * 180 / Math.PI
     if (Math.abs(degree) > this._threshold.rotate_dg) {
       var g = (degree > 0) ? Gesture.GESTURE.ROTATE_CCW : Gesture.GESTURE.ROTATE_CW
       return {
@@ -490,7 +559,7 @@ var degree = dg * 180 / Math.PI
       if (dir == Gesture.DIRECTION.RIGHT) g = Gesture.GESTURE.MOVE_RIGHT
       return {
         gesture: g,
-        fingers: this._rec.pressingIndexSet.size,
+        fingers: Object.keys(this._rec.startTouches).length,
       }
     }
     return false
@@ -498,22 +567,22 @@ var degree = dg * 180 / Math.PI
 
   _isPressed(dist, dir, dur) {
     if (!this._rec.startFromTouch) return false
-    if (this._rec.pressingIndexSet.size == 0) return false
+    if (this._rec.allFingerReleased) return false
     if (dist > this._threshold.move_px) return false
     if (dur < this._threshold.moment_ms) return false
     if (dur < this._threshold.press_ms) return false
     return {
       gesture: Gesture.GESTURE.PRESS,
-      fingers: this._rec.fingerIndexSet.size,
+      fingers: Object.keys(this._rec.startTouches).length,
     }
   }
 
   _isPinched(sp, ep, dist, dir, dur) {
-    if (this._rec.pressingIndexSet.size < 2) return false
-    var threshold = this._threshold.pinch_px * Object.keys(this._rec.startPoints).length
+    if (this._rec.touching < 2) return false
+    var threshold = this._threshold.pinch_px * Object.keys(this._rec.startTouches).length
     var g = Gesture.GESTURE.UNRECOGNIZED
-    var spoints = Object.values(this._rec.startPoints)
-    var epoints = Object.values(this._rec.curPoints)
+    var spoints = Object.values(this._rec.startTouches)
+    var epoints = Object.values(this._rec.curTouches)
     var sdSum = 0
     var edSum = 0
     for (var i = 0; i < spoints.length; i++) {
@@ -529,14 +598,14 @@ var degree = dg * 180 / Math.PI
     }
     return {
       gesture: g,
-      fingers: this._rec.pressingIndexSet.size,
+      fingers: Object.keys(this._rec.startTouches).length,
       pinchSum: edSum - sdSum,
     }
   }
 
   _isSwiped(dist, dir, dur) {
     if (!this._rec.startFromTouch) return false
-    if (this._rec.pressingIndexSet.size !== 0) return false
+    if (!this._rec.allFingerReleased) return false
     if (dist < this._threshold.move_px) return false
     if (dur < this._threshold.moment_ms) {
       var g = Gesture.GESTURE.UNRECOGNIZED
@@ -546,7 +615,7 @@ var degree = dg * 180 / Math.PI
       if (dir == Gesture.DIRECTION.RIGHT) g = Gesture.GESTURE.SWIPE_RIGHT
       return {
         gesture: g,
-        fingers: this._rec.fingerIndexSet.size,
+        fingers: Object.keys(this._rec.startTouches).length,
       }
     }
     return false
@@ -554,13 +623,13 @@ var degree = dg * 180 / Math.PI
 
   _isTapped(dist, dir, dur) {
     if (!this._rec.startFromTouch) return false
-    if (this._rec.pressingIndexSet.size !== 0) return false
+    if (!this._rec.allFingerReleased) return false
     if (dist > this._threshold.move_px) return false
     if (dur < this._threshold.moment_ms) {
       var g = Gesture.GESTURE.TAP
       return {
         gesture: g,
-        fingers: this._rec.fingerIndexSet.size,
+        fingers: Object.keys(this._rec.startTouches).length,
       }
     }
     return false

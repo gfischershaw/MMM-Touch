@@ -4,42 +4,48 @@
 }
 
 #TOUCH {
-  width: 150px;
-  font-size:16px;
+  width: 100%;
+  min-width: 260px;
+  font-size:20px;
   text-align:left;
   line-height: 100%;
+  display:flex;
+  flex-direction: row;
+  border-radius:20px;
+  background-color:#FCF8E8;
 }
 
 #TOUCH.hidden {
   display:none;
 }
 
+#TOUCH.activated {
+  background-color:#ECDFC8;
+}
+
 #TOUCH .mode {
-  background-color:#FFF;
+  order:1;
+  background-color:#ECB390;
   color:#000;
-  border-radius:8px;
-  padding:4px;
+  border-radius:20px;
+  padding:4px 8px;
+  margin:8px;
+  margin-right:4px;
 }
 
 #TOUCH .command {
-    background-color:#00F;
-    color:#FFF;
-    border-radius:8px;
-    padding:4px;
+  order:1;
+  background-color:#DF7861;
+  color:#FFF;
+  border-radius:20px;
+  margin:8px;
+  margin-left:4px;
+  width:auto;
  }
 
  #TOUCH .command.fired {
-   animation-name: fadeOut;
-   animation-duration: 1s;
-   opacity:0;
+  padding:4px 8px;
+  animation-name: fadeOut;
+  animation-duration: 1s;
+  opacity:0;
  }
-
-#TOUCH .region_1 {
-  background-color: red;
-  height:100px;
-}
-
-#TOUCH .region_2 {
-  background-color: blue;
-  height:100px;
-}
