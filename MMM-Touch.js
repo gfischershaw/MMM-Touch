@@ -220,6 +220,7 @@ Module.register("MMM-Touch", {
 
   doCommand: function(gest, mode=this.mode) {
     var command = gest.gesture + "_" + gest.fingers
+    log("Recognized Gesture:", command)
     if (!this.commands.hasOwnProperty(mode)) return
     if (this.commands[mode].hasOwnProperty(command)) {
       this.curCommand = command
@@ -458,6 +459,7 @@ class Gesture {
       path: r.path
     }
     this.emit(Gesture.EVENT.RECOGNIZED, Object.assign({}, temp, result))
+
     this._init()
     return true
   }
