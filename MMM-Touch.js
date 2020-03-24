@@ -204,7 +204,7 @@ Module.register("MMM-Touch", {
   },
 
   updateMode: function(mode) {
-    var dom = document.getElementById("TOUCH")
+    var dom = document.querySelector("#TOUCH .mode")
     dom.innerHTML = mode
   },
 
