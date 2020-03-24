@@ -1,6 +1,8 @@
 # MMM-Touch
 MagicMirror plugin for touch gesture commander using touchscreen  
 
+## Screenshot
+![](https://raw.githubusercontent.com/eouia/MMM-Touch/master/MMM-Touch.png)
 
 ## Features
 - Multi-fingers supported. (If your touchpanel or touchframe would support.)
