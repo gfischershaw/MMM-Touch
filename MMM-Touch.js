@@ -43,6 +43,7 @@ Module.register("MMM-Touch", {
   },
 
   start: function() {
+    window.oncontextmenu = function() { return false; }
     this.gesture = null
     this.curCommand = null
     this.useDisplay = this.config.useDisplay
@@ -93,9 +94,8 @@ Module.register("MMM-Touch", {
   getDom: function() {
     var dom = document.createElement("div")
     dom.id = "TOUCH"
-    if (!this.config.useDisplay) {
+    if (!this.useDisplay) {
       dom.classList.add("hidden")
-      return dom
     }
     var mode = document.createElement("div")
     mode.classList.add("mode")
@@ -570,7 +570,6 @@ class Gesture {
 
   _isPressed(dist, dir, dur) {
     if (!this._rec.startFromTouch) return false
-    if (this._rec.allFingerReleased) return false
     if (dist > this._threshold.move_px) return false
     if (dur < this._threshold.moment_ms) return false
     if (dur < this._threshold.press_ms) return false
