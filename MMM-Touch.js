@@ -11,14 +11,21 @@ Module.register("MMM-Touch", {
   defaults: {
     debug: false,
     useDisplay: true,
+    autoMode: false, // false || [] == disabled or an array of:
+                     // "module" == use module names
+                     // "index" == use module indexes
+                     // "instanceid" == use module instance ids
+                     // anything == reference to any other mode names in the config
     threshold: {
       moment_ms: 1000 * 0.5, // TAP and SWIPE should be quicker than this.
+      double_ms: 1000 * 0.75, // DOUBLE_TAP gap should be quicker than this. Set to zero to disable.
       press_ms: 1000 * 3, // PRESS should be longer than this.
       move_px: 50, // MOVE and SWIPE should go further than this.
       pinch_px: 50, // Average of traveling distance of each finger should be more than this for PINCH
       rotate_dg: 20, // Average rotating angle of each finger should be more than this for ROTATE
     },
-    defaultMode: "default",
+    defaultMode: "default", // This can also be an array. When set to an array backwards compatibility
+                            // for getMode() is turned off, providing a consistent return type.
     gestureCommands: {
       "default": {
         "TAP_1": (commander) => {
@@ -47,12 +54,15 @@ Module.register("MMM-Touch", {
     this.gesture = null
     this.curCommand = null
     this.useDisplay = this.config.useDisplay
+    this.autoMode = (this.config.autoMode === false) ? [] : ((this.config.autoMode instanceof Array) ? this.config.autoMode : [this.config.autoMode])
+    this.lastTapTime = undefined // Used by threshold.double_ms on single finger Tap events.
     this.tempTimer = null
     this.onNotification = (typeof this.config.onNotification == "function") ? this.config.onNotification : ()=>{}
     if (this.config.debug) {
       log = _log
     }
-    this.mode = this.config.defaultMode
+    this.defaultMode = (this.config.defaultMode instanceof Array) ? this.config.defaultMode : [this.config.defaultMode]
+    this.mode = this.defaultMode
     this.commands = {}
     for(var mode in this.config.gestureCommands) {
       if (this.config.gestureCommands.hasOwnProperty(mode)) {
@@ -76,7 +86,8 @@ Module.register("MMM-Touch", {
         return MM.getModules()
       },
       getMode: () => {
-        return this.mode
+        // Allow backward compatibility while also using this.config.defaultMode to force a consistent return type.
+        return ((this.config.defaultMode instanceof Array) || (this.mode.length !== 1)) ? this.mode : this.mode[0]
       },
       setMode: (mode = null) => {
         return this.setMode(mode)
@@ -99,7 +110,7 @@ Module.register("MMM-Touch", {
     }
     var mode = document.createElement("div")
     mode.classList.add("mode")
-    mode.innerHTML = this.mode
+    mode.innerHTML = this.mode.join('|')
     var command = document.createElement("div")
     command.classList.add("command")
     dom.appendChild(mode)
@@ -117,8 +128,13 @@ Module.register("MMM-Touch", {
 
   setMode: function(mode = null) {
     if (!mode) return false
-    if (!this.commands.hasOwnProperty(mode)) return false
-    this.mode = mode
+    let modeList = []
+    const modes = (mode instanceof Array) ? mode : [mode]
+    modes.forEach((m)=>{
+      if (this.commands.hasOwnProperty(m)) modeList.push(m)
+    })
+    if (!modeList.length) return false
+    this.mode = modeList
     this.updateMode(this.mode)
     return mode
   },
@@ -139,7 +155,8 @@ Module.register("MMM-Touch", {
 
     if (noti == "TOUCH_GET_MODE") {
       if (typeof payload == "function") {
-        payload(this.mode)
+        // Allow backward compatibility while also using this.config.defaultMode to force a consistent return type.
+        payload(((this.config.defaultMode instanceof Array) || (this.mode.length !== 1)) ? this.mode : this.mode[0])
       }
     }
 
@@ -167,7 +184,39 @@ Module.register("MMM-Touch", {
   },
 
   defineTouch: function() {
-    this.gesture = new Gesture(this.config.threshold)
+    this.gesture = new Gesture(this.config.threshold, function(t){
+        // Callback to set the current list of modes when autoMode is enabled.
+        if (this.autoMode.length) {
+          const moduleNode = t.closest('.module')
+          // Leave mode as-is when tapping blank areas so things like a full-screen newsfeed can be closed.
+          if (moduleNode) {
+            let modeList = []
+            const autoModes = {
+              // The name of the module as specified in the second item in the list of classes after "module" of the root node.
+              'module': function(moduleNode) {return Array.from(moduleNode.classList)[1]}.bind(this),
+              // The index in the config file as specified within the root node id string.
+              'index': function(moduleNode) {return moduleNode.id.split('_')[1]}.bind(this),
+              // The id of the module instance in the config file as specified by the optional "instanceid" property.
+              'instanceid': function(moduleNode) {
+                const index = moduleNode.id.split('_')[1]
+                if ((index !== undefined) && (MM.getModules()[index] !== undefined) && (MM.getModules()[index].config.hasOwnProperty('instanceid'))) {
+                  return MM.getModules()[index].config.instanceid
+                }
+              }.bind(this),
+            }
+            this.autoMode.forEach((autoModeType)=>{
+              // Either use one of the reserved mode type words to indirect to a mode name, or assume
+              // the given autoModeType references an actual listed mode.
+              const m = autoModes.hasOwnProperty(autoModeType) ? autoModes[autoModeType](moduleNode) : autoModeType
+              if (m !== undefined) {
+                modeList.push(m)
+              }
+            })
+            // If the entire list of modes is rejected fall back to the default.
+            if (!this.setMode(modeList)) this.setMode(this.defaultMode)
+          }
+        }
+      }.bind(this))
     this.gesture
       .on(Gesture.EVENT.CANCELED, ()=>{
         log("Canceled.")
@@ -205,7 +254,7 @@ Module.register("MMM-Touch", {
 
   updateMode: function(mode) {
     var dom = document.querySelector("#TOUCH .mode")
-    dom.innerHTML = mode
+    dom.innerHTML = mode.join('|')
   },
 
   fireCommand: function(c) {
@@ -215,18 +264,41 @@ Module.register("MMM-Touch", {
   },
 
   forceCommand: function(mode, gestureObject) {
-    return this.doCommand(gestureObject, mode)
+    // It does not make sense to track previous single-fingered Taps for forced commands,
+    // as a Double Tap could be simulated just by sending it. So ensure the flag is cleared
+    // so that a forced Tap command does not accidentally turn into a Double Tap.
+    this.lastTapTime = undefined
+    return this.doCommand(gestureObject, (mode instanceof Array) ? mode : [mode])
   },
 
   doCommand: function(gest, mode=this.mode) {
-    var command = gest.gesture + "_" + gest.fingers
+    var command = gest.gesture
+    // A Double Tap is comprised of 2 single-fingered Tap gestures, unless disabled by a zero threshold.
+    if ((command === "TAP") && (gest.fingers == 1) && this.config.threshold.double_ms) {
+      // If this is the previous gesture was not a single-fingered Tap, or the time period expired, store the timestamp.
+      // Otherwise this was the second part of a Double Tap.
+      if ((this.lastTapTime === undefined) || (gest.releaseTime - this.lastTapTime >= this.config.threshold.double_ms)) {
+        this.lastTapTime = gest.releaseTime
+      } else {
+        this.lastTapTime = undefined
+        command = "DOUBLE_TAP"
+      }
+    } else {
+      this.lastTapTime = undefined
+    }
+    command += "_" + gest.fingers
     log("Recognized Gesture:", command)
-    if (!this.commands.hasOwnProperty(mode)) return
-    if (this.commands[mode].hasOwnProperty(command)) {
-      this.curCommand = command
-      this.commands[mode][command](new GestureCommander(this.commanderCallbacks), gest)
-      log("Command executed:", mode, command)
-      this.fireCommand(command)
+    for (let i = 0; i < mode.length; i++) {
+      // Search through all modes for the first, if any, to contain the gesture.
+      if (this.commands.hasOwnProperty(mode[i])) {
+        if (this.commands[mode[i]].hasOwnProperty(command)) {
+          this.curCommand = command
+          this.commands[mode[i]][command](new GestureCommander(this.commanderCallbacks), gest)
+          log("Command executed:", mode[i], command)
+          this.fireCommand(command)
+          break;
+        }
+      }
     }
   }
 })
@@ -273,9 +345,10 @@ class Gesture {
     }
   }
 
-  constructor(threshold) {
+  constructor(threshold, autoSetMode) {
     this._events = {}
     this._threshold = threshold
+    this._autoSetMode = autoSetMode // Callback function to set the current mode if autoMode is enabled.
     this._dom = document
     var handlerTouch = (evt) => {
       this._handlerTouch("touch", evt)
@@ -361,18 +434,7 @@ class Gesture {
 
   _handlerTouch(type, evt) {
     // check target has onclick
-    var cancelBubbling = false
-    var i = 0
-    if (evt.target.onclick !== null && evt.target !== this._dom) {
-      cancelBubbling = true
-    }
-    while (i < evt.path.length && cancelBubbling !== true) {
-      if (evt.path[i].onclick !== null) {
-        cancelBubbling = true
-      }
-      i++
-    }
-    if (cancelBubbling) {
+    if ((evt.target.onclick !== null && evt.target !== this._dom) || (typeof(evt.composedPath().find(function(t){return t.onclick !== null})) !== "undefined")) {
       this.emit(Gesture.EVENT.YIELD)
       this.cancel()
     }
@@ -396,7 +458,7 @@ class Gesture {
         this.emit(Gesture.EVENT.FIRSTTOUCH)
         if (type == "touch") r.startFromTouch = true
         r.target = evt.target
-        r.path = evt.path
+        r.composedPath = evt.composedPath()
       }
       if (!r.startTouches.hasOwnProperty(id)) {
         // new touch
@@ -431,11 +493,11 @@ class Gesture {
     var r = this._rec
     var sc = this._getCentroid(r.startTouches)
     var ec = this._getCentroid(r.lastTouches)
+    if (!sc || !ec) return false
     var dist = this._getDistance(sc, ec)
     var dir = this._getDirection(sc, ec)
     var dur = this._getDuration()
-    if (!sc || !ec) return false
-    var result = null
+    var result
 
     if (result = this._isTapped(dist, dir, dur)) {}
     else if (result = this._isSwiped(dist, dir, dur)) {}
@@ -457,8 +519,9 @@ class Gesture {
       direction: dir,
       duration: dur,
       target: r.target,
-      path: r.path
+      composedPath: r.composedPath
     }
+    this._autoSetMode(r.target) // If autoMode is enabled, set up current mode first based on module instance being gestured.
     this.emit(Gesture.EVENT.RECOGNIZED, Object.assign({}, temp, result))
 
     this._init()
@@ -632,6 +695,7 @@ class Gesture {
       return {
         gesture: g,
         fingers: Object.keys(this._rec.startTouches).length,
+        releaseTime: this._rec.lastTime,
       }
     }
     return false
