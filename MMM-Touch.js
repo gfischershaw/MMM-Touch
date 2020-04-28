@@ -206,9 +206,7 @@ Module.register("MMM-Touch", {
               // The index in the config file as specified within the root node id string.
               'index': function(moduleNode) {return moduleNode.id.split('_')[1]}.bind(this),
               // The id of the module instance in the config file as specified by the optional "instanceId" property.
-              'instanceId': function(moduleNode) {
-                return this.instanceId
-              }.bind(this),
+              'instanceId': function(moduleNode) {return this.instanceId}.bind(this),
             }
             this.autoMode.forEach((autoModeType)=>{
               // Either use one of the reserved mode type words to indirect to a mode name, or assume
