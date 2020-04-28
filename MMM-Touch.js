@@ -14,8 +14,9 @@ Module.register("MMM-Touch", {
     autoMode: false, // false || [] == disabled or an array of:
                      // "module" == use module names
                      // "index" == use module indexes
-                     // "instanceid" == use module instance ids
+                     // "instanceId" == use module instance ids
                      // anything == reference to any other mode names in the config
+    instanceId: undefined, // With autoMode, current module instance ID, if any.
     threshold: {
       moment_ms: 1000 * 0.5, // TAP and SWIPE should be quicker than this.
       double_ms: 1000 * 0.75, // DOUBLE_TAP gap should be quicker than this. Set to zero to disable.
@@ -183,6 +184,13 @@ Module.register("MMM-Touch", {
     }
   },
 
+  resolveInstanceId: function(n) {
+    const index = n.id.split('_')[1]
+    if ((index !== undefined) && (MM.getModules()[index] !== undefined) && (MM.getModules()[index].config.hasOwnProperty('instanceId'))) {
+      return MM.getModules()[index].config.instanceId
+    }
+  },
+
   defineTouch: function() {
     this.gesture = new Gesture(this.config.threshold, function(t){
         // Callback to set the current list of modes when autoMode is enabled.
@@ -190,18 +198,16 @@ Module.register("MMM-Touch", {
           const moduleNode = t.closest('.module')
           // Leave mode as-is when tapping blank areas so things like a full-screen newsfeed can be closed.
           if (moduleNode) {
+            this.instanceId = this.resolveInstanceId(moduleNode)
             let modeList = []
             const autoModes = {
               // The name of the module as specified in the second item in the list of classes after "module" of the root node.
               'module': function(moduleNode) {return Array.from(moduleNode.classList)[1]}.bind(this),
               // The index in the config file as specified within the root node id string.
               'index': function(moduleNode) {return moduleNode.id.split('_')[1]}.bind(this),
-              // The id of the module instance in the config file as specified by the optional "instanceid" property.
-              'instanceid': function(moduleNode) {
-                const index = moduleNode.id.split('_')[1]
-                if ((index !== undefined) && (MM.getModules()[index] !== undefined) && (MM.getModules()[index].config.hasOwnProperty('instanceid'))) {
-                  return MM.getModules()[index].config.instanceid
-                }
+              // The id of the module instance in the config file as specified by the optional "instanceId" property.
+              'instanceId': function(moduleNode) {
+                return this.instanceId
               }.bind(this),
             }
             this.autoMode.forEach((autoModeType)=>{
@@ -215,6 +221,7 @@ Module.register("MMM-Touch", {
             // If the entire list of modes is rejected fall back to the default.
             if (!this.setMode(modeList)) this.setMode(this.defaultMode)
           }
+          return this.instanceId
         }
       }.bind(this))
     this.gesture
@@ -267,8 +274,8 @@ Module.register("MMM-Touch", {
     // It does not make sense to track previous single-fingered Taps for forced commands,
     // as a Double Tap could be simulated just by sending it. So ensure the flag is cleared
     // so that a forced Tap command does not accidentally turn into a Double Tap.
-    this.lastTapTime = undefined
-    return this.doCommand(gestureObject, (mode instanceof Array) ? mode : [mode])
+		this.lastTapTime = undefined
+    return this.doCommand(gestureObject, (typeof mode === "undefined") ? undefined : ((mode instanceof Array) ? mode : [mode]))
   },
 
   doCommand: function(gest, mode=this.mode) {
@@ -519,9 +526,9 @@ class Gesture {
       direction: dir,
       duration: dur,
       target: r.target,
-      composedPath: r.composedPath
+      composedPath: r.composedPath,
+      instanceId: this._autoSetMode(r.target) // If autoMode is enabled, set up current mode first based on module instance being gestured.
     }
-    this._autoSetMode(r.target) // If autoMode is enabled, set up current mode first based on module instance being gestured.
     this.emit(Gesture.EVENT.RECOGNIZED, Object.assign({}, temp, result))
 
     this._init()

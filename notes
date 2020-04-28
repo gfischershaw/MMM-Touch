@@ -1,0 +1,40 @@
+I tried out this module and was frustrated with a few things, so made a few additions. If interested I can send the code:
+
+DOUBLE_TAP
+Tracks the delta-T between successive single-finger TAP events and transforms the second TAP to a DOUBLE_TAP if it is within the threshold. This implies that any double tap will always be a DOUBLE_TAP_1. This can be disabled by setting the threshold to zero.
+
+Allow arrays of modes:
+The module handles an ordered list (i.e., array) of gesture modes which are searched in order for the first containing a supported gesture. defaultMode can optionally be set to an array, and setMode() optionally takes an array. For backwards compatibility getMode() returns a string when only a single mode has been set. That can be overridden to provide a consistent return type by setting defaultMode to an array rather than the default of being a string.
+
+Automatic mode setting:
+The current array of modes can be automatically determined by the target of the touch event. This allows one to tap say, a newsfeed module instance, and have the current mode automatically change to an appropriate set of gestures for that module. autoMode is disabled by default for compatibility, and to enable can be set to either a string for a single item, or an array of multiple items. Valid values:
+
+"module" - This entry is translated into the module name.  If the target of the touch event is a newsfeed, then the resultant mode will be "newsfeed".
+"index" - This entry is translated into the index of the module in MM.getModules(). I.e., "1", "2", "3", etc. Not a great feature, but it appears elsewhere in modules, so it is here as well.
+"instanceid" - This entry is translated into an optional string in the target module's config section of the same name. This is one piece of the support for multiple instances of a module. So one could add say, instanceid: "nytimes" to a newsfeed config that sources the NY Times.
+mode name - Lastly, any mode name can also be used as part of the list.
+
+autoMode Example:
+autoMode: ["swipe_page_override","nytimes","module"]
+
+Gesture Examples:
+"SWIPE_LEFT_1": (commander, gesture) => {
+	commander.sendNotification("ARTICLE_NEXT", {instanceId: gesture.instanceId})
+},
+"MOVE_LEFT_1": (commander, gesture) => {
+	commander.forceCommand(commander.getMode(), {gesture:"SWIPE_LEFT", fingers:"1", instanceId:gesture.instanceId})
+},
+"DOUBLE_TAP_1": (commander, gesture) => {
+	commander.sendNotification("ARTICLE_MORE_DETAILS", {instanceId: gesture.instanceId})
+},
+"TAP_1": (commander, gesture) => {
+	commander.sendNotification("ARTICLE_LESS_DETAILS", {instanceId: gesture.instanceId})
+},
+
+Added "instanceId" to the Gesture object passed to gesture commands. If autoMode is enabled and if the module instance that receives a touch event has defined an "instanceId" then it will be passed through. Otherwise undefined. This should be passed as part of the payload to sendNotification() for modules that can support multiple instances. When calling forceCommand() the instanceId can be passed in the payload.
+
+Of course to make multiple module instances actually work, a module needs to pay attention to the optional instance information within a sendNotification(). The following newsfeed example code in notificationReceived() will only rejects calls when an instanceId has actually been passed, but the module instance does not define an instanceId or they do not match. So notifications without an instanceId are accepted by all module instances:
+
+if(payload && payload.hasOwnProperty('instanceId') && (!this.config.instanceId.length || (this.config.instanceId != payload.instanceId))){
+	return false
+}
