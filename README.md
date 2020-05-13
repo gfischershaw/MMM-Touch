@@ -6,7 +6,7 @@ MagicMirror plugin for touch gesture commander using touchscreen
 
 ## Features
 - Multi-touch if supported by the touchpanel or touchframe
-- Available gestures : `TAP`, 'DOUBLE_TAP', `PRESS`, `SWIPE_UP/DOWN/LEFT/RIGHT`, `MOVE_UP/DOWN/LEFT/RIGHT`, `ROTATE_CW/CCW`, `PINCH_IN/OUT`
+- Available gestures : `TAP`, `DOUBLE_TAP`, `PRESS`, `SWIPE_UP/DOWN/LEFT/RIGHT`, `MOVE_UP/DOWN/LEFT/RIGHT`, `ROTATE_CW/CCW`, `PINCH_IN/OUT`
   - Example: `TAP_1`(tapping with 1 finger), `SWIPE_LEFT_2`(swiping left with 2 fingers), `PINCH_IN_3`(pinching-in with 3 fingers)
   - For `ROTATE_CW` and `ROTATE_CCW` only 2 fingers are recognized.
 - Available commands:
