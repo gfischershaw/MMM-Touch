@@ -726,7 +726,7 @@ class GestureCommander {
     var modules = this.getModules()
     if (mName == null) mName = "MMM-Touch"
     for (var i = 0; i < modules.length; i++) {
-      if (modules[i].name == mName) return modules[i]
+      if (modules[i] && modules[i].name == mName) return modules[i]
     }
   }
 
