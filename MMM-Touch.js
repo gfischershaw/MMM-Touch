@@ -24,9 +24,13 @@ Module.register("MMM-Touch", {
       move_px: 50, // MOVE and SWIPE should go further than this.
       pinch_px: 50, // Average of traveling distance of each finger should be more than this for PINCH
       rotate_dg: 20, // Average rotating angle of each finger should be more than this for ROTATE
+      idle_ms: 30000, // Idle time (in milliseconds) after which the defined "onIdle" notification / callback function should be triggered
     },
     defaultMode: "default", // This can also be an array. When set to an array backwards compatibility
                             // for getMode() is turned off, providing a consistent return type.
+    onTouchStart: null, // special event on touch start - define a string for sending a custom notification or a function for a callback; f.e. onTouchStart: "TOUCH_ACTIVITY_NOTIFICATION"
+    onTouchEnd: null, // special event on touch end - define a string for sending a custom notification or a function for a callback
+    onIdle: null, // special event on "idle" - define a string for sending a custom notification or a function for a callback; see also: threshold.idle_ms for specifying the idle time
     gestureCommands: {
       "default": {
         "TAP_1": (commander) => {
@@ -58,6 +62,7 @@ Module.register("MMM-Touch", {
     this.autoMode = (this.config.autoMode === false) ? [] : ((this.config.autoMode instanceof Array) ? this.config.autoMode : [this.config.autoMode])
     this.lastTapTime = undefined // Used by threshold.double_ms on single finger Tap events.
     this.tempTimer = null
+    this.idleTimer = null
     this.onNotification = (typeof this.config.onNotification == "function") ? this.config.onNotification : ()=>{}
     if (this.config.debug) {
       log = _log
@@ -147,6 +152,7 @@ Module.register("MMM-Touch", {
       } else {
         this.defineTouch()
       }
+      this.startIdleTimeout()
     }
 
     if (noti == "TOUCH_USE_DISPLAY") {
@@ -244,17 +250,38 @@ Module.register("MMM-Touch", {
 
 
   touchStarted: function() {
+    clearTimeout(this.idleTimer)
+
     var dom = document.getElementById("TOUCH")
     dom.classList.add("activated")
     var command = document.querySelector("#TOUCH .command")
     command.innerHTML = ""
     command.classList.remove("fired")
+
+    if (typeof this.config.onTouchStart == "string") this.sendNotification(this.config.onTouchStart)
+    if (typeof this.config.onTouchStart == "function") this.config.onTouchStart()
+
   },
 
   touchEnded: function() {
+    clearTimeout(this.idleTimer)
+
     var dom = document.getElementById("TOUCH")
     dom.classList.remove("activated")
 
+    if (typeof this.config.onTouchEnd == "string") this.sendNotification(this.config.onTouchEnd)
+    if (typeof this.config.onTouchEnd == "function") this.config.onTouchEnd()
+
+    this.startIdleTimeout()
+  },
+
+  startIdleTimeout: function() {
+    if (this.config.onIdle && this.config.threshold.idle_ms > 0) {
+      this.idleTimer = setTimeout(() => {
+        if (typeof this.config.onIdle == "string") this.sendNotification(this.config.onIdle)
+        if (typeof this.config.onIdle == "function") this.config.onIdle()
+      }, this.config.threshold.idle_ms)
+    }
   },
 
   updateMode: function(mode) {
